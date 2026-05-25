@@ -40,9 +40,28 @@ Confluence needs three environment variables (Jira does not — it uses `acli`'s
 
 The Jira tools work even if the Confluence variables are unset; the Confluence tools return a clear error until they are set.
 
-## Use with an MCP client
+## Install into Claude Code
 
-Point your client (Claude Desktop, Claude Code, etc.) at the built server:
+After `npm install && npm run build`, register the built server (`dist/index.js`).
+Use the **absolute** path to `dist/index.js` in every example below.
+
+### Option 1 — `claude mcp add` (recommended)
+
+```sh
+claude mcp add atlassian \
+  -e CONFLUENCE_SITE=your-site.atlassian.net \
+  -e [email protected] \
+  -e ATLASSIAN_API_TOKEN=your_api_token \
+  -- node /absolute/path/to/atlassian-mcp/dist/index.js
+```
+
+- Everything after `--` is the command Claude Code launches; `-e` sets environment variables.
+- Scope with `-s`: `local` (default; current project, just you), `-s user` (all your projects), or `-s project` (writes a shared `.mcp.json` to the current repo).
+- Omit the Confluence `-e` flags if you only need Jira.
+
+### Option 2 — manual config file
+
+Create a `.mcp.json` in your project root (project scope), or add the same `mcpServers` block to `~/.claude.json` (user scope):
 
 ```json
 {
@@ -60,9 +79,19 @@ Point your client (Claude Desktop, Claude Code, etc.) at the built server:
 }
 ```
 
-`acli` must be on the `PATH` of the process that launches the server (or set `ACLI_PATH`), and its stored credentials must be readable by that user.
+### Verify
 
-For local testing you can load a `.env` file with Node's built-in flag:
+```sh
+claude mcp list   # lists "atlassian" with a ✓ once it connects
+```
+
+Inside Claude Code, run `/mcp` to see the server and its tools.
+
+> **Note:** `acli` must be on the `PATH` of the process that launches Claude Code (or set `ACLI_PATH`), and its stored credentials must be readable by that user. Jira uses acli's own login (`acli jira auth login`); the env vars above are only for Confluence.
+
+### Other MCP clients
+
+For Claude Desktop or other clients, use the same command / args / env in that client's MCP config format. To run the server directly for local testing, load a `.env` file with Node's built-in flag:
 
 ```sh
 node --env-file=.env dist/index.js
