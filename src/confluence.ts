@@ -80,6 +80,7 @@ export interface PageMeta {
   version: number;
   status: string;
   spaceId?: string;
+  parentId?: string;
 }
 
 type Fetched<T> = { ok: true; value: T } | { ok: false; response: ConfluenceResponse };
@@ -94,6 +95,7 @@ export async function getPageMeta(id: string): Promise<Fetched<PageMeta>> {
     title?: string;
     status?: string;
     spaceId?: string | number;
+    parentId?: string | number | null;
     version?: { number?: number };
   };
   if (typeof d.title !== "string" || typeof d.version?.number !== "number") {
@@ -114,6 +116,7 @@ export async function getPageMeta(id: string): Promise<Fetched<PageMeta>> {
       version: d.version.number,
       status: d.status ?? "current",
       spaceId: d.spaceId !== undefined ? String(d.spaceId) : undefined,
+      parentId: d.parentId !== undefined && d.parentId !== null ? String(d.parentId) : undefined,
     },
   };
 }

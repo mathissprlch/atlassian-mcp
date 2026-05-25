@@ -136,6 +136,7 @@ Guardrails on the destructive Confluence tools:
 
 - `confluence_page_update` and `confluence_page_delete` fetch the page first and accept an **`expectedTitle`** (and `update` also `expectedVersion`); the operation is refused if the live page doesn't match — your defence against acting on a wrong or stale page id.
 - `confluence_page_update` never sends an empty body: if you omit `body`, the current content is read and preserved; if it can't be read, the update aborts instead of blanking the page.
+- `confluence_page_update` always re-sends the page's current parent, so editing the title/body/status can't accidentally move it in the hierarchy; pass `parentId` only when you intend to move the page.
 - `confluence_page_delete` moves the page to the **trash** (recoverable), not a permanent purge, and reports the title it deleted.
 - `confluence_page_create` resolves `spaceKey` by an exact key match and cannot overwrite an existing page (duplicate titles are rejected by Confluence).
 

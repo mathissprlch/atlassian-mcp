@@ -157,8 +157,9 @@ export function registerConfluenceTools(server: McpServer): void {
       description:
         "Update a Confluence page. The Confluence API has no partial update: this reads the current page, " +
         "then sends a full replacement with version+1. Provide `body` to change content; if you omit it, " +
-        "the existing body is preserved (never blanked). Omitted title/status default to current values. " +
-        "Pass `expectedTitle` and/or `expectedVersion` to refuse the write if the page isn't what you " +
+        "the existing body is preserved (never blanked). Omitted title/status default to current values, " +
+        "and the page's current parent is always re-sent so an edit can't move it (pass `parentId` to move " +
+        "it on purpose). Pass `expectedTitle` and/or `expectedVersion` to refuse the write if the page isn't what you " +
         "expect (wrong page, or changed since you read it). Requires ATLASSIAN_MCP_ALLOW_WRITES=true.",
       inputSchema: {
         id: z.string().describe("Page id."),
@@ -169,6 +170,10 @@ export function registerConfluenceTools(server: McpServer): void {
           .default("storage")
           .describe("Body format of `body` (only used when `body` is provided)."),
         status: z.enum(["current", "draft"]).optional().describe("Page status (defaults to current value)."),
+        parentId: z
+          .string()
+          .optional()
+          .describe("Move the page under this parent id. If omitted, the current parent is preserved (the page won't move)."),
         versionMessage: z.string().optional().describe("Optional version comment."),
         expectedTitle: z
           .string()
@@ -182,13 +187,18 @@ export function registerConfluenceTools(server: McpServer): void {
           .describe("If set, the page's current version must match exactly or the update is refused."),
       },
     },
-    ({ id, title, body, representation, status, versionMessage, expectedTitle, expectedVersion }) =>
+    ({ id, title, body, representation, status, parentId, versionMessage, expectedTitle, expectedVersion }) =>
       guard(async () => {
         if (!config.allowWrites) return errorResult(WRITES_DISABLED_MSG);
 
         const metaRes = await getPageMeta(id);
         if (!metaRes.ok) return respond(metaRes.response);
-        const { title: actualTitle, version: actualVersion, status: actualStatus } = metaRes.value;
+        const {
+          title: actualTitle,
+          version: actualVersion,
+          status: actualStatus,
+          parentId: actualParentId,
+        } = metaRes.value;
 
         if (expectedTitle !== undefined && expectedTitle !== actualTitle) {
           return errorResult(
@@ -222,6 +232,10 @@ export function registerConfluenceTools(server: McpServer): void {
           body: { representation: writeRepresentation, value: writeBody },
           version: { number: actualVersion + 1, ...(versionMessage ? { message: versionMessage } : {}) },
         };
+        // Always re-send the current parent (unless the caller is intentionally moving the page) so a
+        // title/body/status edit can never relocate the page in the hierarchy.
+        const effectiveParentId = parentId ?? actualParentId;
+        if (effectiveParentId !== undefined) payload.parentId = effectiveParentId;
         return respond(
           await confluenceRequest({ method: "PUT", path: `/api/v2/pages/${encodeURIComponent(id)}`, body: payload }),
         );
