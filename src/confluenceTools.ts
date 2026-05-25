@@ -2,8 +2,14 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { config } from "./config.js";
-import { confluenceRequest, resolveSpaceId, type ConfluenceResponse } from "./confluence.js";
-import { errorResult, jsonResult, READ_ONLY_MSG, textResult } from "./util.js";
+import {
+  confluenceRequest,
+  getPageMeta,
+  getPageStorageBody,
+  resolveSpaceId,
+  type ConfluenceResponse,
+} from "./confluence.js";
+import { errorResult, jsonResult, textResult, WRITES_DISABLED_MSG } from "./util.js";
 
 async function guard(fn: () => Promise<CallToolResult>): Promise<CallToolResult> {
   try {
@@ -30,9 +36,12 @@ export function registerConfluenceTools(server: McpServer): void {
     {
       title: "Call any Confluence REST API endpoint",
       description:
-        "Make a raw request to the Confluence Cloud REST API. `path` is relative to the site's /wiki base " +
-        "(e.g. '/api/v2/pages', '/api/v2/spaces', '/rest/api/search'). Use v2 (/api/v2/...) for CRUD and " +
-        "v1 (/rest/api/...) for CQL search. Auth uses the configured email + API token.",
+        "Escape hatch: make a raw request to the Confluence Cloud REST API. `path` is relative to the " +
+        "site's /wiki base (e.g. '/api/v2/pages', '/api/v2/spaces', '/rest/api/search'). Use v2 " +
+        "(/api/v2/...) for CRUD and v1 (/rest/api/...) for CQL search. This tool is unrestricted within " +
+        "the API token's permissions, so a wrong path/method/body can damage or delete content. Non-GET " +
+        "methods require ATLASSIAN_MCP_ALLOW_WRITES=true. Prefer the typed confluence_* tools, which add " +
+        "target checks. Auth uses the configured email + API token.",
       inputSchema: {
         method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH"]).default("GET"),
         path: z.string().describe("Path relative to /wiki, e.g. '/api/v2/pages'."),
@@ -45,7 +54,7 @@ export function registerConfluenceTools(server: McpServer): void {
     },
     ({ method, path, query, body }) =>
       guard(async () => {
-        if (config.readOnly && method !== "GET") return errorResult(READ_ONLY_MSG);
+        if (!config.allowWrites && method !== "GET") return errorResult(WRITES_DISABLED_MSG);
         return respond(await confluenceRequest({ method, path, query, body }));
       }),
   );
@@ -110,7 +119,8 @@ export function registerConfluenceTools(server: McpServer): void {
       title: "Create a Confluence page",
       description:
         "Create a Confluence page. Provide either spaceId (numeric) or spaceKey. Body defaults to the " +
-        "'storage' representation (Confluence storage format / XHTML).",
+        "'storage' representation (Confluence storage format / XHTML). Confluence rejects a duplicate " +
+        "title within a space. Requires ATLASSIAN_MCP_ALLOW_WRITES=true.",
       inputSchema: {
         spaceId: z.string().optional().describe("Numeric space id."),
         spaceKey: z.string().optional().describe("Space key (resolved to an id automatically)."),
@@ -126,7 +136,7 @@ export function registerConfluenceTools(server: McpServer): void {
     },
     ({ spaceId, spaceKey, title, body, representation, parentId, status }) =>
       guard(async () => {
-        if (config.readOnly) return errorResult(READ_ONLY_MSG);
+        if (!config.allowWrites) return errorResult(WRITES_DISABLED_MSG);
         if (!spaceId && !spaceKey) return errorResult("Provide spaceId or spaceKey.");
         const resolvedSpaceId = spaceId ?? (await resolveSpaceId(spaceKey as string));
         const payload: Record<string, unknown> = {
@@ -145,44 +155,72 @@ export function registerConfluenceTools(server: McpServer): void {
     {
       title: "Update a Confluence page",
       description:
-        "Update a Confluence page's title and/or body. The current version is fetched automatically and " +
-        "incremented; unspecified fields keep their current values.",
+        "Update a Confluence page. The Confluence API has no partial update: this reads the current page, " +
+        "then sends a full replacement with version+1. Provide `body` to change content; if you omit it, " +
+        "the existing body is preserved (never blanked). Omitted title/status default to current values. " +
+        "Pass `expectedTitle` and/or `expectedVersion` to refuse the write if the page isn't what you " +
+        "expect (wrong page, or changed since you read it). Requires ATLASSIAN_MCP_ALLOW_WRITES=true.",
       inputSchema: {
         id: z.string().describe("Page id."),
         title: z.string().optional().describe("New title (defaults to current)."),
-        body: z.string().optional().describe("New body content (defaults to current)."),
+        body: z.string().optional().describe("New body content. If omitted, the current body is kept."),
         representation: z
           .enum(["storage", "atlas_doc_format", "wiki"])
           .default("storage")
-          .describe("Body format of `body`."),
-        status: z.enum(["current", "draft"]).default("current").describe("Page status."),
+          .describe("Body format of `body` (only used when `body` is provided)."),
+        status: z.enum(["current", "draft"]).optional().describe("Page status (defaults to current value)."),
         versionMessage: z.string().optional().describe("Optional version comment."),
+        expectedTitle: z
+          .string()
+          .optional()
+          .describe("If set, the page's current title must match exactly or the update is refused."),
+        expectedVersion: z
+          .number()
+          .int()
+          .nonnegative()
+          .optional()
+          .describe("If set, the page's current version must match exactly or the update is refused."),
       },
     },
-    ({ id, title, body, representation, status, versionMessage }) =>
+    ({ id, title, body, representation, status, versionMessage, expectedTitle, expectedVersion }) =>
       guard(async () => {
-        if (config.readOnly) return errorResult(READ_ONLY_MSG);
-        const current = await confluenceRequest({
-          path: `/api/v2/pages/${encodeURIComponent(id)}`,
-          query: { "body-format": representation },
-        });
-        if (!current.ok) return respond(current);
+        if (!config.allowWrites) return errorResult(WRITES_DISABLED_MSG);
 
-        const cur = current.data as {
-          title?: string;
-          version?: { number?: number };
-          body?: Record<string, { value?: string }>;
-        };
-        const currentVersion = Number(cur.version?.number ?? 0);
-        const newTitle = title ?? cur.title ?? "";
-        const newBody = body ?? cur.body?.[representation]?.value ?? "";
+        const metaRes = await getPageMeta(id);
+        if (!metaRes.ok) return respond(metaRes.response);
+        const { title: actualTitle, version: actualVersion, status: actualStatus } = metaRes.value;
+
+        if (expectedTitle !== undefined && expectedTitle !== actualTitle) {
+          return errorResult(
+            `Refusing to update: page ${id} is titled "${actualTitle}", not "${expectedTitle}". ` +
+              "Re-check the page id.",
+          );
+        }
+        if (expectedVersion !== undefined && expectedVersion !== actualVersion) {
+          return errorResult(
+            `Refusing to update: page ${id} is at version ${actualVersion}, not ${expectedVersion}. ` +
+              "It changed since you read it; re-fetch before updating.",
+          );
+        }
+
+        let writeRepresentation = representation;
+        let writeBody: string;
+        if (body !== undefined) {
+          writeBody = body;
+        } else {
+          // Metadata-only change (e.g. title): preserve the existing body via a storage round-trip.
+          const bodyRes = await getPageStorageBody(id);
+          if (!bodyRes.ok) return respond(bodyRes.response);
+          writeBody = bodyRes.value;
+          writeRepresentation = "storage";
+        }
 
         const payload: Record<string, unknown> = {
           id,
-          status,
-          title: newTitle,
-          body: { representation, value: newBody },
-          version: { number: currentVersion + 1, ...(versionMessage ? { message: versionMessage } : {}) },
+          status: status ?? actualStatus,
+          title: title ?? actualTitle,
+          body: { representation: writeRepresentation, value: writeBody },
+          version: { number: actualVersion + 1, ...(versionMessage ? { message: versionMessage } : {}) },
         };
         return respond(
           await confluenceRequest({ method: "PUT", path: `/api/v2/pages/${encodeURIComponent(id)}`, body: payload }),
@@ -194,15 +232,36 @@ export function registerConfluenceTools(server: McpServer): void {
     "confluence_page_delete",
     {
       title: "Delete a Confluence page",
-      description: "Delete a Confluence page by id.",
+      description:
+        "Move a Confluence page to the trash by id (recoverable; not a permanent purge). The page is " +
+        "fetched first so its title is verified and reported. Pass `expectedTitle` to refuse the delete " +
+        "if it doesn't match. Requires ATLASSIAN_MCP_ALLOW_WRITES=true.",
       inputSchema: {
         id: z.string().describe("Page id."),
+        expectedTitle: z
+          .string()
+          .optional()
+          .describe("If set, the page's current title must match exactly or the delete is refused."),
       },
     },
-    ({ id }) =>
+    ({ id, expectedTitle }) =>
       guard(async () => {
-        if (config.readOnly) return errorResult(READ_ONLY_MSG);
-        return respond(await confluenceRequest({ method: "DELETE", path: `/api/v2/pages/${encodeURIComponent(id)}` }));
+        if (!config.allowWrites) return errorResult(WRITES_DISABLED_MSG);
+
+        const metaRes = await getPageMeta(id);
+        if (!metaRes.ok) return respond(metaRes.response);
+        const actualTitle = metaRes.value.title;
+
+        if (expectedTitle !== undefined && expectedTitle !== actualTitle) {
+          return errorResult(
+            `Refusing to delete: page ${id} is titled "${actualTitle}", not "${expectedTitle}". ` +
+              "Re-check the page id.",
+          );
+        }
+
+        const res = await confluenceRequest({ method: "DELETE", path: `/api/v2/pages/${encodeURIComponent(id)}` });
+        if (!res.ok) return respond(res);
+        return textResult(`Moved page ${id} ("${actualTitle}") to trash.`);
       }),
   );
 }

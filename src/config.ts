@@ -18,7 +18,7 @@ export interface ConfluenceConfig {
 interface Config {
   acliPath: string;
   acliTimeoutMs: number;
-  readOnly: boolean;
+  allowWrites: boolean;
   confluence: ConfluenceConfig | null;
 }
 
@@ -37,7 +37,7 @@ function loadConfig(): Config {
   return {
     acliPath: process.env.ACLI_PATH?.trim() || "acli",
     acliTimeoutMs: Number.isFinite(timeout) && timeout > 0 ? timeout : 120_000,
-    readOnly: envBool(process.env.ATLASSIAN_MCP_READ_ONLY),
+    allowWrites: envBool(process.env.ATLASSIAN_MCP_ALLOW_WRITES),
     confluence,
   };
 }

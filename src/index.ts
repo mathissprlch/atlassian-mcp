@@ -17,9 +17,12 @@ async function main(): Promise<void> {
   const confluenceState = config.confluence
     ? "configured"
     : "NOT configured (set CONFLUENCE_SITE, ATLASSIAN_EMAIL, ATLASSIAN_API_TOKEN)";
+  const writesState = config.allowWrites
+    ? "ENABLED"
+    : "disabled (set ATLASSIAN_MCP_ALLOW_WRITES=true to enable)";
   console.error(
     `atlassian-mcp running (stdio). Jira via acli '${config.acliPath}'. ` +
-      `Confluence ${confluenceState}. Read-only: ${config.readOnly}.`,
+      `Confluence ${confluenceState}. Writes: ${writesState}.`,
   );
 }
 

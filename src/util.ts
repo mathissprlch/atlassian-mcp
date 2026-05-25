@@ -1,7 +1,8 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
-export const READ_ONLY_MSG =
-  "Server is in read-only mode (ATLASSIAN_MCP_READ_ONLY). This write operation is disabled.";
+export const WRITES_DISABLED_MSG =
+  "Writes are disabled. Set ATLASSIAN_MCP_ALLOW_WRITES=true to allow create, edit, transition, " +
+  "delete and other non-GET operations.";
 
 export function textResult(text: string): CallToolResult {
   return { content: [{ type: "text", text }] };

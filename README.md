@@ -36,7 +36,7 @@ Confluence needs three environment variables (Jira does not — it uses `acli`'s
 | `ATLASSIAN_API_TOKEN` | for Confluence | Atlassian API token |
 | `ACLI_PATH` | no | Path to the `acli` binary (default `acli`) |
 | `ACLI_TIMEOUT_MS` | no | acli subprocess timeout (default `120000`) |
-| `ATLASSIAN_MCP_READ_ONLY` | no | `true` disables all write/destructive tools |
+| `ATLASSIAN_MCP_ALLOW_WRITES` | no | `true` enables write/destructive tools. **Default: writes disabled (read-only).** |
 
 The Jira tools work even if the Confluence variables are unset; the Confluence tools return a clear error until they are set.
 
@@ -126,9 +126,20 @@ The typed Jira tools are conveniences for common operations. For anything else �
 
 Use `confluence_request` for anything not covered by a typed tool (attachments, comments, labels, blog posts, etc.).
 
-## Read-only mode
+Confluence has **no partial page update** — `PUT /api/v2/pages/{id}` is a full replace requiring `id`, `status`, `title`, `body` and the next `version`. `confluence_page_update` therefore reads the page first and resends it with `version + 1`; omit `body` and the existing content is preserved (never blanked).
 
-Set `ATLASSIAN_MCP_READ_ONLY=true` to disable writes: typed write tools are blocked, `confluence_request` rejects non-`GET` methods, and `acli_run` rejects commands whose verb looks mutating (best-effort).
+## Safety & write protection
+
+Writes are **disabled by default**. Set `ATLASSIAN_MCP_ALLOW_WRITES=true` to enable them. While disabled: the typed write tools (`jira_workitem_create/edit/transition`, `confluence_page_create/update/delete`) are blocked, `confluence_request` rejects non-`GET` methods, and `acli_run` rejects commands whose verb looks mutating (best-effort).
+
+Guardrails on the destructive Confluence tools:
+
+- `confluence_page_update` and `confluence_page_delete` fetch the page first and accept an **`expectedTitle`** (and `update` also `expectedVersion`); the operation is refused if the live page doesn't match — your defence against acting on a wrong or stale page id.
+- `confluence_page_update` never sends an empty body: if you omit `body`, the current content is read and preserved; if it can't be read, the update aborts instead of blanking the page.
+- `confluence_page_delete` moves the page to the **trash** (recoverable), not a permanent purge, and reports the title it deleted.
+- `confluence_page_create` resolves `spaceKey` by an exact key match and cannot overwrite an existing page (duplicate titles are rejected by Confluence).
+
+**Use a least-privilege token.** Every Confluence operation runs with the permissions of `ATLASSIAN_API_TOKEN`'s account — `confluence_request` especially is bounded only by that scope. Prefer a [scoped API token](https://id.atlassian.com/manage-profile/security/api-tokens) or a dedicated service account with access limited to the spaces you intend to use. Treat the write tools as sensitive: don't blanket-allow them in your MCP client; keep the per-call approval prompt.
 
 ## Development
 

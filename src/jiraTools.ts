@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { config } from "./config.js";
 import { acliResultToTool, isMutatingAcli, runAcli } from "./acli.js";
-import { errorResult, READ_ONLY_MSG } from "./util.js";
+import { errorResult, WRITES_DISABLED_MSG } from "./util.js";
 
 export function registerJiraTools(server: McpServer): void {
   server.registerTool(
@@ -23,7 +23,7 @@ export function registerJiraTools(server: McpServer): void {
       },
     },
     async ({ args }) => {
-      if (config.readOnly && isMutatingAcli(args)) return errorResult(READ_ONLY_MSG);
+      if (!config.allowWrites && isMutatingAcli(args)) return errorResult(WRITES_DISABLED_MSG);
       return acliResultToTool(await runAcli(args));
     },
   );
@@ -78,7 +78,7 @@ export function registerJiraTools(server: McpServer): void {
       },
     },
     async ({ project, type, summary, description, assignee, extraArgs }) => {
-      if (config.readOnly) return errorResult(READ_ONLY_MSG);
+      if (!config.allowWrites) return errorResult(WRITES_DISABLED_MSG);
       const args = ["jira", "workitem", "create", "--project", project, "--type", type, "--summary", summary];
       if (description !== undefined) args.push("--description", description);
       if (assignee !== undefined) args.push("--assignee", assignee);
@@ -102,7 +102,7 @@ export function registerJiraTools(server: McpServer): void {
       },
     },
     async ({ key, summary, assignee, extraArgs }) => {
-      if (config.readOnly) return errorResult(READ_ONLY_MSG);
+      if (!config.allowWrites) return errorResult(WRITES_DISABLED_MSG);
       if (summary === undefined && assignee === undefined && (!extraArgs || extraArgs.length === 0)) {
         return errorResult("Nothing to change: provide summary, assignee, or extraArgs.");
       }
@@ -126,7 +126,7 @@ export function registerJiraTools(server: McpServer): void {
       },
     },
     async ({ key, status, extraArgs }) => {
-      if (config.readOnly) return errorResult(READ_ONLY_MSG);
+      if (!config.allowWrites) return errorResult(WRITES_DISABLED_MSG);
       const args = ["jira", "workitem", "transition", "--key", key, "--status", status, "--yes", "--json", ...(extraArgs ?? [])];
       return acliResultToTool(await runAcli(args));
     },
