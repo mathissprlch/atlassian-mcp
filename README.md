@@ -108,6 +108,7 @@ node --env-file=.env dist/index.js
 | `jira_workitem_search` | Search work items with JQL. |
 | `jira_workitem_create` | Create a work item. |
 | `jira_workitem_edit` | Edit a work item. |
+| `jira_workitem_transitions` | List the transitions (target statuses) currently available on a work item. Read-only. Uses the Jira REST API since `acli` has no command for this. |
 | `jira_workitem_transition` | Transition a work item to a new status. |
 
 The typed Jira tools are conveniences for common operations. For anything else — boards, sprints, filters, dashboards, fields, projects, admin — use `acli_run` (e.g. `["jira","sprint","--help"]`). The typed tools also accept `extraArgs` to pass additional raw flags.

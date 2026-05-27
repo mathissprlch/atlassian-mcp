@@ -1,4 +1,4 @@
-import { getConfluenceConfig } from "./config.js";
+import { getAtlassianConfig } from "./config.js";
 
 export interface ConfluenceResponse {
   ok: boolean;
@@ -29,8 +29,8 @@ function normalizePath(p: string): string {
 }
 
 export async function confluenceRequest(opts: ConfluenceRequestOptions): Promise<ConfluenceResponse> {
-  const cfg = getConfluenceConfig();
-  const url = new URL(cfg.baseUrl + normalizePath(opts.path));
+  const cfg = getAtlassianConfig();
+  const url = new URL(cfg.wikiBase + normalizePath(opts.path));
   if (opts.query) {
     for (const [k, v] of Object.entries(opts.query)) {
       if (v !== undefined) url.searchParams.set(k, String(v));

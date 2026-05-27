@@ -2,7 +2,8 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { config } from "./config.js";
 import { acliResultToTool, isMutatingAcli, runAcli } from "./acli.js";
-import { errorResult, WRITES_DISABLED_MSG } from "./util.js";
+import { jiraRequest } from "./jira.js";
+import { errorResult, jsonResult, WRITES_DISABLED_MSG } from "./util.js";
 
 export function registerJiraTools(server: McpServer): void {
   server.registerTool(
@@ -111,6 +112,33 @@ export function registerJiraTools(server: McpServer): void {
       if (assignee !== undefined) args.push("--assignee", assignee);
       args.push("--yes", "--json", ...(extraArgs ?? []));
       return acliResultToTool(await runAcli(args));
+    },
+  );
+
+  server.registerTool(
+    "jira_workitem_transitions",
+    {
+      title: "List available transitions for a Jira work item",
+      description:
+        "List the workflow transitions currently available on a Jira work item — the statuses you can " +
+        "move it to from its present status, with each transition's id and target status name. acli has " +
+        "no command for this, so this calls the Jira Cloud REST API (GET /rest/api/3/issue/{key}/transitions) " +
+        "using ATLASSIAN_SITE, ATLASSIAN_EMAIL and ATLASSIAN_API_TOKEN. Read-only.",
+      inputSchema: {
+        key: z.string().describe("Work item key, e.g. ABC-123."),
+      },
+    },
+    async ({ key }) => {
+      try {
+        const res = await jiraRequest({ path: `/rest/api/3/issue/${encodeURIComponent(key)}/transitions` });
+        if (!res.ok) {
+          const detail = typeof res.data === "string" ? res.data : JSON.stringify(res.data, null, 2);
+          return errorResult(`Jira API error: HTTP ${res.status}\n${detail}`);
+        }
+        return jsonResult(res.data);
+      } catch (e) {
+        return errorResult(e instanceof Error ? e.message : String(e));
+      }
     },
   );
 

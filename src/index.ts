@@ -14,15 +14,15 @@ async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  const confluenceState = config.confluence
+  const restState = config.atlassian
     ? "configured"
-    : "NOT configured (set CONFLUENCE_SITE, ATLASSIAN_EMAIL, ATLASSIAN_API_TOKEN)";
+    : "NOT configured (set ATLASSIAN_SITE, ATLASSIAN_EMAIL, ATLASSIAN_API_TOKEN)";
   const writesState = config.allowWrites
     ? "ENABLED"
     : "disabled (set ATLASSIAN_MCP_ALLOW_WRITES=true to enable)";
   console.error(
-    `atlassian-mcp running (stdio). Jira via acli '${config.acliPath}'. ` +
-      `Confluence ${confluenceState}. Writes: ${writesState}.`,
+    `atlassian-mcp running (stdio). Jira via acli '${config.acliPath}' (jira_workitem_transitions uses REST). ` +
+      `Atlassian REST ${restState}. Writes: ${writesState}.`,
   );
 }
 
