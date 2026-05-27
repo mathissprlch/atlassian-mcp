@@ -160,13 +160,18 @@ export function registerJiraTools(server: McpServer): void {
         expand: z
           .string()
           .optional()
-          .describe("Comma-separated fields to expand, e.g. 'transitions.fields' to include each transition's input fields."),
+          .describe("Expand parameter; pass 'transitions.fields' to include each transition's input fields."),
+        transitionId: z
+          .string()
+          .optional()
+          .describe("If set, narrow the result to only this transition id."),
       },
     },
-    ({ key, expand }) =>
+    ({ key, expand, transitionId }) =>
       atlassianGuard(async () => {
         const query: Record<string, string> = {};
         if (expand) query.expand = expand;
+        if (transitionId) query.transitionId = transitionId;
         return respondJira(
           await jiraRequest({ path: `/rest/api/3/issue/${encodeURIComponent(key)}/transitions`, query }),
         );

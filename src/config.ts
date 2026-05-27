@@ -31,8 +31,15 @@ function loadConfig(): Config {
 
   let atlassian: AtlassianConfig | null = null;
   if (site && email && token) {
-    const { siteHost, siteBase } = parseAtlassianSite(site);
-    atlassian = { siteHost, siteBase, email, token };
+    try {
+      const { siteHost, siteBase } = parseAtlassianSite(site);
+      atlassian = { siteHost, siteBase, email, token };
+    } catch (e) {
+      console.error(
+        `atlassian-mcp: ignoring malformed Atlassian site '${site}' (${e instanceof Error ? e.message : String(e)}). ` +
+          "REST tools will report as not configured.",
+      );
+    }
   }
 
   const timeout = Number.parseInt(process.env.ACLI_TIMEOUT_MS ?? "", 10);

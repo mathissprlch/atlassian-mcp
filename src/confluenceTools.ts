@@ -25,7 +25,8 @@ export function registerConfluenceTools(server: McpServer): void {
         "(/api/v2/...) for CRUD and v1 (/rest/api/...) for CQL search. This tool is unrestricted within " +
         "the API token's permissions, so a wrong path/method/body can damage or delete content. Non-GET " +
         "methods require ATLASSIAN_MCP_ALLOW_WRITES=true. Prefer the typed confluence_* tools, which add " +
-        "target checks. Auth uses the configured email + API token.",
+        "target checks. Auth uses ATLASSIAN_SITE (or CONFLUENCE_SITE), ATLASSIAN_EMAIL and " +
+        "ATLASSIAN_API_TOKEN.",
       inputSchema: {
         method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH"]).default("GET"),
         path: z.string().describe("Path relative to /wiki, e.g. '/api/v2/pages'."),

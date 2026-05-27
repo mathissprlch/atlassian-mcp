@@ -17,7 +17,7 @@ export interface AtlassianHttpRequest {
   body?: unknown;
 }
 
-export function normalizePath(p: string): string {
+function normalizePath(p: string): string {
   let path = p.trim();
   if (!path.startsWith("/")) path = "/" + path;
   // Reject path traversal so a crafted path can't escape the intended API roots.
