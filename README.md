@@ -2,12 +2,12 @@
 
 An [MCP](https://modelcontextprotocol.io) server for Atlassian Cloud.
 
-- **Jira** — wraps the official Atlassian CLI (`acli`). The server shells out to your locally installed, already-authenticated `acli`.
-- **Confluence** — the official `acli` has no Confluence commands, so Confluence is served through the **Confluence Cloud REST API** using the *same* email + API token.
+- **Jira** — primarily wraps the official Atlassian CLI (`acli`); two tools (`jira_workitem_transitions`, `jira_request`) use the Jira Cloud REST API for endpoints `acli` doesn't expose.
+- **Confluence** — `acli` has no Confluence commands, so Confluence is served through the **Confluence Cloud REST API** using the *same* email + API token as Jira.
 
 Auth is **API-token only**. The server itself performs no login flow:
-- Jira relies on `acli`'s own stored session (`acli jira auth login`).
-- Confluence uses `ATLASSIAN_EMAIL` + `ATLASSIAN_API_TOKEN` (the same token works for both products).
+- Jira mostly relies on `acli`'s stored session (`acli jira auth login`); the two REST-based Jira tools use the env vars below.
+- Confluence and the Jira REST tools use `ATLASSIAN_EMAIL` + `ATLASSIAN_API_TOKEN` (the same token works across both products).
 
 ## Requirements
 
@@ -31,9 +31,10 @@ Confluence needs three environment variables (Jira does not — it uses `acli`'s
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `CONFLUENCE_SITE` | for Confluence | e.g. `your-site.atlassian.net` |
-| `ATLASSIAN_EMAIL` | for Confluence | Atlassian account email |
-| `ATLASSIAN_API_TOKEN` | for Confluence | Atlassian API token |
+| `ATLASSIAN_SITE` | for REST tools | e.g. `your-site.atlassian.net` (used by Confluence and the REST-based Jira tools) |
+| `CONFLUENCE_SITE` | no | Accepted as a synonym for `ATLASSIAN_SITE` (backward compat) |
+| `ATLASSIAN_EMAIL` | for REST tools | Atlassian account email |
+| `ATLASSIAN_API_TOKEN` | for REST tools | Atlassian API token |
 | `ACLI_PATH` | no | Path to the `acli` binary (default `acli`) |
 | `ACLI_TIMEOUT_MS` | no | acli subprocess timeout (default `120000`) |
 | `ATLASSIAN_MCP_ALLOW_WRITES` | no | `true` enables write/destructive tools. **Default: writes disabled (read-only).** |
@@ -49,7 +50,7 @@ Use the **absolute** path to `dist/index.js` in every example below.
 
 ```sh
 claude mcp add atlassian \
-  -e CONFLUENCE_SITE=your-site.atlassian.net \
+  -e ATLASSIAN_SITE=your-site.atlassian.net \
   -e [email protected] \
   -e ATLASSIAN_API_TOKEN=your_api_token \
   -- node /absolute/path/to/atlassian-mcp/dist/index.js
@@ -70,7 +71,7 @@ Create a `.mcp.json` in your project root (project scope), or add the same `mcpS
       "command": "node",
       "args": ["/absolute/path/to/atlassian-mcp/dist/index.js"],
       "env": {
-        "CONFLUENCE_SITE": "your-site.atlassian.net",
+        "ATLASSIAN_SITE": "your-site.atlassian.net",
         "ATLASSIAN_EMAIL": "[email protected]",
         "ATLASSIAN_API_TOKEN": "your_api_token"
       }
@@ -104,6 +105,7 @@ node --env-file=.env dist/index.js
 | Tool | Description |
 | --- | --- |
 | `acli_run` | Run **any** `acli` command — the complete acli surface (jira, admin, ...). |
+| `jira_request` | Call **any** Jira Cloud REST endpoint (path relative to site root). For Jira features `acli` doesn't expose. |
 | `jira_workitem_view` | View a work item by key. |
 | `jira_workitem_search` | Search work items with JQL. |
 | `jira_workitem_create` | Create a work item. |
@@ -111,7 +113,7 @@ node --env-file=.env dist/index.js
 | `jira_workitem_transitions` | List the transitions (target statuses) currently available on a work item. Read-only. Uses the Jira REST API since `acli` has no command for this. |
 | `jira_workitem_transition` | Transition a work item to a new status. |
 
-The typed Jira tools are conveniences for common operations. For anything else — boards, sprints, filters, dashboards, fields, projects, admin — use `acli_run` (e.g. `["jira","sprint","--help"]`). The typed tools also accept `extraArgs` to pass additional raw flags.
+The typed Jira tools are conveniences for common operations. For anything else — boards, sprints, filters, dashboards, fields, projects, admin — use `acli_run` (e.g. `["jira","sprint","--help"]`); for Jira REST endpoints `acli` doesn't cover, use `jira_request`. The typed tools also accept `extraArgs` to pass additional raw flags.
 
 ### Confluence (via REST API)
 
@@ -141,7 +143,7 @@ Guardrails on the destructive Confluence tools:
 - `confluence_page_delete` moves the page to the **trash** (recoverable), not a permanent purge, and reports the title it deleted.
 - `confluence_page_create` resolves `spaceKey` by an exact key match and cannot overwrite an existing page (duplicate titles are rejected by Confluence).
 
-**Use a least-privilege token.** Every Confluence operation runs with the permissions of `ATLASSIAN_API_TOKEN`'s account — `confluence_request` especially is bounded only by that scope. Prefer a [scoped API token](https://id.atlassian.com/manage-profile/security/api-tokens) or a dedicated service account with access limited to the spaces you intend to use. Treat the write tools as sensitive: don't blanket-allow them in your MCP client; keep the per-call approval prompt.
+**Use a least-privilege token.** Every REST operation runs with the permissions of `ATLASSIAN_API_TOKEN`'s account. `confluence_request` and `jira_request` are bounded only by that scope, and the REST-based Jira tools (`jira_workitem_transitions`, `jira_request`) require Jira read permission on the token. Prefer a [scoped API token](https://id.atlassian.com/manage-profile/security/api-tokens) or a dedicated service account limited to the spaces/projects you intend to use. Treat the write tools as sensitive: don't blanket-allow them in your MCP client; keep the per-call approval prompt.
 
 ## Development
 

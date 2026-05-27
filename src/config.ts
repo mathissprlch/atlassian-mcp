@@ -2,16 +2,16 @@ function envBool(value: string | undefined): boolean {
   return value !== undefined && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
-function parseAtlassianSite(site: string): { siteHost: string; wikiBase: string } {
+function parseAtlassianSite(site: string): { siteHost: string; siteBase: string } {
   let s = site.trim().replace(/\/+$/, "");
   if (!/^https?:\/\//i.test(s)) s = "https://" + s;
   const url = new URL(s);
-  return { siteHost: url.host, wikiBase: `${url.protocol}//${url.host}/wiki` };
+  return { siteHost: url.host, siteBase: `${url.protocol}//${url.host}` };
 }
 
 export interface AtlassianConfig {
-  siteHost: string; // e.g. "your-site.atlassian.net" — used by Jira REST
-  wikiBase: string; // e.g. "https://your-site.atlassian.net/wiki" — used by Confluence REST
+  siteHost: string; // e.g. "your-site.atlassian.net"
+  siteBase: string; // e.g. "https://your-site.atlassian.net" (scheme preserved from the input)
   email: string;
   token: string;
 }
@@ -24,15 +24,15 @@ interface Config {
 }
 
 function loadConfig(): Config {
-  // ATLASSIAN_SITE is the preferred name; CONFLUENCE_SITE is accepted as an alias for backward compat.
+  // ATLASSIAN_SITE is the preferred name; CONFLUENCE_SITE is accepted as a synonym for backward compat.
   const site = process.env.ATLASSIAN_SITE ?? process.env.CONFLUENCE_SITE;
   const email = process.env.ATLASSIAN_EMAIL;
   const token = process.env.ATLASSIAN_API_TOKEN;
 
   let atlassian: AtlassianConfig | null = null;
   if (site && email && token) {
-    const { siteHost, wikiBase } = parseAtlassianSite(site);
-    atlassian = { siteHost, wikiBase, email, token };
+    const { siteHost, siteBase } = parseAtlassianSite(site);
+    atlassian = { siteHost, siteBase, email, token };
   }
 
   const timeout = Number.parseInt(process.env.ACLI_TIMEOUT_MS ?? "", 10);

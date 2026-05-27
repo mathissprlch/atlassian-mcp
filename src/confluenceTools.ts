@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { atlassianGuard, respondAtlassian } from "./atlassian.js";
 import { config } from "./config.js";
 import {
   confluenceRequest,
@@ -9,26 +9,10 @@ import {
   resolveSpaceId,
   type ConfluenceResponse,
 } from "./confluence.js";
-import { errorResult, jsonResult, textResult, WRITES_DISABLED_MSG } from "./util.js";
+import { errorResult, textResult, WRITES_DISABLED_MSG } from "./util.js";
 
-async function guard(fn: () => Promise<CallToolResult>): Promise<CallToolResult> {
-  try {
-    return await fn();
-  } catch (e) {
-    return errorResult(e instanceof Error ? e.message : String(e));
-  }
-}
-
-function respond(res: ConfluenceResponse): CallToolResult {
-  if (!res.ok) {
-    const detail = typeof res.data === "string" ? res.data : JSON.stringify(res.data, null, 2);
-    return errorResult(`Confluence API error: HTTP ${res.status}\n${detail}`);
-  }
-  if (res.data === "" || res.data === null || res.data === undefined) {
-    return textResult(`Success (HTTP ${res.status}).`);
-  }
-  return jsonResult(res.data);
-}
+const guard = atlassianGuard;
+const respond = (res: ConfluenceResponse) => respondAtlassian(res, "Confluence");
 
 export function registerConfluenceTools(server: McpServer): void {
   server.registerTool(

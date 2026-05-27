@@ -1,9 +1,12 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { atlassianGuard, respondAtlassian, type AtlassianHttpResponse } from "./atlassian.js";
 import { config } from "./config.js";
 import { acliResultToTool, isMutatingAcli, runAcli } from "./acli.js";
 import { jiraRequest } from "./jira.js";
-import { errorResult, jsonResult, WRITES_DISABLED_MSG } from "./util.js";
+import { errorResult, WRITES_DISABLED_MSG } from "./util.js";
+
+const respondJira = (res: AtlassianHttpResponse) => respondAtlassian(res, "Jira");
 
 export function registerJiraTools(server: McpServer): void {
   server.registerTool(
@@ -27,6 +30,34 @@ export function registerJiraTools(server: McpServer): void {
       if (!config.allowWrites && isMutatingAcli(args)) return errorResult(WRITES_DISABLED_MSG);
       return acliResultToTool(await runAcli(args));
     },
+  );
+
+  server.registerTool(
+    "jira_request",
+    {
+      title: "Call any Jira Cloud REST API endpoint",
+      description:
+        "Escape hatch: make a raw request to the Jira Cloud REST API. `path` is relative to the site " +
+        "root (e.g. '/rest/api/3/issue/ABC-1', '/rest/api/3/search'). This tool is unrestricted within " +
+        "the API token's permissions, so a wrong path/method/body can damage or delete data. Non-GET " +
+        "methods require ATLASSIAN_MCP_ALLOW_WRITES=true. Prefer typed jira_* tools or acli_run when " +
+        "they cover what you need. Auth uses ATLASSIAN_SITE (or CONFLUENCE_SITE), ATLASSIAN_EMAIL and " +
+        "ATLASSIAN_API_TOKEN.",
+      inputSchema: {
+        method: z.enum(["GET", "POST", "PUT", "DELETE", "PATCH"]).default("GET"),
+        path: z.string().describe("Path relative to the site root, e.g. '/rest/api/3/issue/ABC-1'."),
+        query: z
+          .record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
+          .optional()
+          .describe("Query string parameters."),
+        body: z.unknown().optional().describe("JSON request body for POST/PUT/PATCH."),
+      },
+    },
+    ({ method, path, query, body }) =>
+      atlassianGuard(async () => {
+        if (!config.allowWrites && method !== "GET") return errorResult(WRITES_DISABLED_MSG);
+        return respondJira(await jiraRequest({ method, path, query, body }));
+      }),
   );
 
   server.registerTool(
@@ -123,23 +154,23 @@ export function registerJiraTools(server: McpServer): void {
         "List the workflow transitions currently available on a Jira work item — the statuses you can " +
         "move it to from its present status, with each transition's id and target status name. acli has " +
         "no command for this, so this calls the Jira Cloud REST API (GET /rest/api/3/issue/{key}/transitions) " +
-        "using ATLASSIAN_SITE, ATLASSIAN_EMAIL and ATLASSIAN_API_TOKEN. Read-only.",
+        "using ATLASSIAN_SITE (or CONFLUENCE_SITE), ATLASSIAN_EMAIL and ATLASSIAN_API_TOKEN. Read-only.",
       inputSchema: {
         key: z.string().describe("Work item key, e.g. ABC-123."),
+        expand: z
+          .string()
+          .optional()
+          .describe("Comma-separated fields to expand, e.g. 'transitions.fields' to include each transition's input fields."),
       },
     },
-    async ({ key }) => {
-      try {
-        const res = await jiraRequest({ path: `/rest/api/3/issue/${encodeURIComponent(key)}/transitions` });
-        if (!res.ok) {
-          const detail = typeof res.data === "string" ? res.data : JSON.stringify(res.data, null, 2);
-          return errorResult(`Jira API error: HTTP ${res.status}\n${detail}`);
-        }
-        return jsonResult(res.data);
-      } catch (e) {
-        return errorResult(e instanceof Error ? e.message : String(e));
-      }
-    },
+    ({ key, expand }) =>
+      atlassianGuard(async () => {
+        const query: Record<string, string> = {};
+        if (expand) query.expand = expand;
+        return respondJira(
+          await jiraRequest({ path: `/rest/api/3/issue/${encodeURIComponent(key)}/transitions`, query }),
+        );
+      }),
   );
 
   server.registerTool(
