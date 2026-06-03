@@ -8,6 +8,21 @@ import { errorResult, WRITES_DISABLED_MSG } from "./util.js";
 
 const respondJira = (res: AtlassianHttpResponse) => respondAtlassian(res, "Jira");
 
+// Wrap plain text in a minimal ADF document. Newlines are preserved as hard breaks within a single
+// paragraph; for multi-paragraph or rich content, pass bodyAdf instead.
+function plainTextToAdf(text: string): unknown {
+  if (text === "") {
+    return { type: "doc", version: 1, content: [{ type: "paragraph", content: [] }] };
+  }
+  const lines = text.split("\n");
+  const content: unknown[] = [];
+  lines.forEach((line, i) => {
+    if (i > 0) content.push({ type: "hardBreak" });
+    if (line) content.push({ type: "text", text: line });
+  });
+  return { type: "doc", version: 1, content: [{ type: "paragraph", content }] };
+}
+
 export function registerJiraTools(server: McpServer): void {
   server.registerTool(
     "acli_run",
@@ -64,14 +79,23 @@ export function registerJiraTools(server: McpServer): void {
     "jira_workitem_view",
     {
       title: "View a Jira work item",
-      description: "View a single Jira work item (issue) by key, e.g. ABC-123. Returns JSON.",
+      description:
+        "View a single Jira work item (issue) by key, e.g. ABC-123. Defaults to all fields ('*all') so " +
+        "the model rarely needs follow-up calls; pass a comma-separated `fields` to narrow output " +
+        "(e.g. 'summary,status,assignee,comment'). Returns JSON.",
       inputSchema: {
         key: z.string().describe("Work item key, e.g. ABC-123."),
+        fields: z
+          .string()
+          .default("*all")
+          .describe("Comma-separated fields to return. Defaults to '*all'. Use e.g. 'summary,status,comment' for less verbose output, or '*navigable' for the standard set."),
         extraArgs: z.array(z.string()).optional().describe("Extra raw acli flags to append."),
       },
     },
-    async ({ key, extraArgs }) =>
-      acliResultToTool(await runAcli(["jira", "workitem", "view", "--key", key, "--json", ...(extraArgs ?? [])])),
+    async ({ key, fields, extraArgs }) =>
+      acliResultToTool(
+        await runAcli(["jira", "workitem", "view", key, "--fields", fields, "--json", ...(extraArgs ?? [])]),
+      ),
   );
 
   server.registerTool(
@@ -99,7 +123,7 @@ export function registerJiraTools(server: McpServer): void {
       title: "Create a Jira work item",
       description:
         "Create a Jira work item (issue). Requires project, type and summary. Use extraArgs for fields " +
-        "not covered here (e.g. --priority, --label, --parent).",
+        "not covered here (e.g. --label, --parent). acli's create does not support --priority directly.",
       inputSchema: {
         project: z.string().describe("Project key, e.g. ABC."),
         type: z.string().describe('Work item type, e.g. "Task", "Bug", "Story".'),
@@ -114,7 +138,7 @@ export function registerJiraTools(server: McpServer): void {
       const args = ["jira", "workitem", "create", "--project", project, "--type", type, "--summary", summary];
       if (description !== undefined) args.push("--description", description);
       if (assignee !== undefined) args.push("--assignee", assignee);
-      args.push("--yes", "--json", ...(extraArgs ?? []));
+      args.push("--json", ...(extraArgs ?? []));
       return acliResultToTool(await runAcli(args));
     },
   );
@@ -194,5 +218,109 @@ export function registerJiraTools(server: McpServer): void {
       const args = ["jira", "workitem", "transition", "--key", key, "--status", status, "--yes", "--json", ...(extraArgs ?? [])];
       return acliResultToTool(await runAcli(args));
     },
+  );
+
+  server.registerTool(
+    "jira_workitem_comment_list",
+    {
+      title: "List comments on a Jira work item",
+      description: "List comments on a Jira work item via acli (acli jira workitem comment list). Read-only.",
+      inputSchema: {
+        key: z.string().describe("Work item key, e.g. ABC-123."),
+        limit: z.number().int().positive().max(100).optional().describe("Max comments per page (acli default 50)."),
+        order: z
+          .enum(["+created", "-created", "+updated", "-updated"])
+          .optional()
+          .describe("Sort order. acli default is '+created'."),
+        paginate: z.boolean().optional().describe("Fetch all pages, not just the first."),
+        extraArgs: z.array(z.string()).optional().describe("Extra raw acli flags to append."),
+      },
+    },
+    async ({ key, limit, order, paginate, extraArgs }) => {
+      const args = ["jira", "workitem", "comment", "list", "--key", key, "--json"];
+      if (limit !== undefined) args.push("--limit", String(limit));
+      if (order !== undefined) args.push("--order", order);
+      if (paginate) args.push("--paginate");
+      args.push(...(extraArgs ?? []));
+      return acliResultToTool(await runAcli(args));
+    },
+  );
+
+  server.registerTool(
+    "jira_workitem_comment_add",
+    {
+      title: "Add a comment to a Jira work item",
+      description:
+        "Add a comment to a Jira work item via acli (acli jira workitem comment create). The body can be " +
+        "plain text or Atlassian Document Format. Requires ATLASSIAN_MCP_ALLOW_WRITES=true.",
+      inputSchema: {
+        key: z.string().describe("Work item key, e.g. ABC-123."),
+        body: z.string().describe("Comment body (plain text or ADF)."),
+        extraArgs: z.array(z.string()).optional().describe("Extra raw acli flags to append."),
+      },
+    },
+    async ({ key, body, extraArgs }) => {
+      if (!config.allowWrites) return errorResult(WRITES_DISABLED_MSG);
+      const args = ["jira", "workitem", "comment", "create", "--key", key, "--body", body, "--json", ...(extraArgs ?? [])];
+      return acliResultToTool(await runAcli(args));
+    },
+  );
+
+  server.registerTool(
+    "jira_workitem_comment_update",
+    {
+      title: "Update a Jira work item comment",
+      description:
+        "Update a comment on a Jira work item via the Jira Cloud REST API (PUT /rest/api/3/issue/{key}/comment/{id}). " +
+        "acli's `comment update` lacks --json output, so this routes through REST for structured responses. " +
+        "Plain text in `body` is wrapped as a single ADF paragraph (newlines become hard breaks); pass " +
+        "`bodyAdf` for multi-paragraph or rich content. Requires ATLASSIAN_MCP_ALLOW_WRITES=true.",
+      inputSchema: {
+        key: z.string().describe("Work item key, e.g. ABC-123."),
+        id: z.string().describe("Comment id."),
+        body: z.string().optional().describe("New comment body as plain text (wrapped as ADF)."),
+        bodyAdf: z.unknown().optional().describe("New comment body as a full ADF JSON document. Overrides `body` if both are set."),
+      },
+    },
+    ({ key, id, body, bodyAdf }) =>
+      atlassianGuard(async () => {
+        if (!config.allowWrites) return errorResult(WRITES_DISABLED_MSG);
+        if (bodyAdf === undefined && body === undefined) {
+          return errorResult("Provide either `body` (plain text) or `bodyAdf` (ADF JSON).");
+        }
+        const adf = bodyAdf ?? plainTextToAdf(body as string);
+        return respondJira(
+          await jiraRequest({
+            method: "PUT",
+            path: `/rest/api/3/issue/${encodeURIComponent(key)}/comment/${encodeURIComponent(id)}`,
+            body: { body: adf },
+          }),
+        );
+      }),
+  );
+
+  server.registerTool(
+    "jira_workitem_comment_delete",
+    {
+      title: "Delete a Jira work item comment",
+      description:
+        "Delete a comment from a Jira work item via the Jira Cloud REST API (DELETE /rest/api/3/issue/{key}/comment/{id}). " +
+        "acli's `comment delete` has no --yes flag and would hang on the interactive confirmation prompt, so this " +
+        "routes through REST. Requires ATLASSIAN_MCP_ALLOW_WRITES=true.",
+      inputSchema: {
+        key: z.string().describe("Work item key, e.g. ABC-123."),
+        id: z.string().describe("Comment id."),
+      },
+    },
+    ({ key, id }) =>
+      atlassianGuard(async () => {
+        if (!config.allowWrites) return errorResult(WRITES_DISABLED_MSG);
+        return respondJira(
+          await jiraRequest({
+            method: "DELETE",
+            path: `/rest/api/3/issue/${encodeURIComponent(key)}/comment/${encodeURIComponent(id)}`,
+          }),
+        );
+      }),
   );
 }

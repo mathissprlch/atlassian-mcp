@@ -2,11 +2,11 @@
 
 An [MCP](https://modelcontextprotocol.io) server for Atlassian Cloud.
 
-- **Jira** — primarily wraps the official Atlassian CLI (`acli`); two tools (`jira_workitem_transitions`, `jira_request`) use the Jira Cloud REST API for endpoints `acli` doesn't expose.
+- **Jira** — primarily wraps the official Atlassian CLI (`acli`); a handful of tools (`jira_workitem_transitions`, `jira_workitem_comment_update`, `jira_workitem_comment_delete`, `jira_request`) use the Jira Cloud REST API for endpoints `acli` doesn't expose well.
 - **Confluence** — `acli` has no Confluence commands, so Confluence is served through the **Confluence Cloud REST API** using the *same* email + API token as Jira.
 
 Auth is **API-token only**. The server itself performs no login flow:
-- Jira mostly relies on `acli`'s stored session (`acli jira auth login`); the two REST-based Jira tools use the env vars below.
+- Jira mostly relies on `acli`'s stored session (`acli jira auth login`); the REST-based Jira tools use the env vars below.
 - Confluence and the Jira REST tools use `ATLASSIAN_EMAIL` + `ATLASSIAN_API_TOKEN` (the same token works across both products).
 
 ## Requirements
@@ -106,12 +106,16 @@ node --env-file=.env dist/index.js
 | --- | --- |
 | `acli_run` | Run **any** `acli` command — the complete acli surface (jira, admin, ...). |
 | `jira_request` | Call **any** Jira Cloud REST endpoint (path relative to site root). For Jira features `acli` doesn't expose. |
-| `jira_workitem_view` | View a work item by key. |
+| `jira_workitem_view` | View a work item by key. Defaults to all fields; pass `fields` to narrow. |
 | `jira_workitem_search` | Search work items with JQL. |
 | `jira_workitem_create` | Create a work item. |
 | `jira_workitem_edit` | Edit a work item. |
 | `jira_workitem_transitions` | List the transitions (target statuses) currently available on a work item. Read-only. Uses the Jira REST API since `acli` has no command for this. |
 | `jira_workitem_transition` | Transition a work item to a new status. |
+| `jira_workitem_comment_list` | List comments on a work item (acli). |
+| `jira_workitem_comment_add` | Add a comment to a work item (acli). |
+| `jira_workitem_comment_update` | Update a comment (REST — acli's update lacks `--json`). |
+| `jira_workitem_comment_delete` | Delete a comment (REST — acli's delete lacks `--yes` and would hang on confirmation). |
 
 The typed Jira tools are conveniences for common operations. For anything else — boards, sprints, filters, dashboards, fields, projects, admin — use `acli_run` (e.g. `["jira","sprint","--help"]`); for Jira REST endpoints `acli` doesn't cover, use `jira_request`. The typed tools also accept `extraArgs` to pass additional raw flags.
 
@@ -143,7 +147,7 @@ Guardrails on the destructive Confluence tools:
 - `confluence_page_delete` moves the page to the **trash** (recoverable), not a permanent purge, and reports the title it deleted.
 - `confluence_page_create` resolves `spaceKey` by an exact key match and cannot overwrite an existing page (duplicate titles are rejected by Confluence).
 
-**Use a least-privilege token.** Every REST operation runs with the permissions of `ATLASSIAN_API_TOKEN`'s account. `confluence_request` and `jira_request` are bounded only by that scope, and the REST-based Jira tools (`jira_workitem_transitions`, `jira_request`) require Jira read permission on the token. Prefer a [scoped API token](https://id.atlassian.com/manage-profile/security/api-tokens) or a dedicated service account limited to the spaces/projects you intend to use. Treat the write tools as sensitive: don't blanket-allow them in your MCP client; keep the per-call approval prompt.
+**Use a least-privilege token.** Every REST operation runs with the permissions of `ATLASSIAN_API_TOKEN`'s account. `confluence_request` and `jira_request` are bounded only by that scope. The REST-based Jira tools (`jira_workitem_transitions`, `jira_workitem_comment_update`, `jira_workitem_comment_delete`, `jira_request`) need Jira API permissions on the token — read at minimum, write for `comment_update`/`comment_delete` and any non-GET via `jira_request`. Prefer a [scoped API token](https://id.atlassian.com/manage-profile/security/api-tokens) or a dedicated service account limited to the spaces/projects you intend to use. Treat the write tools as sensitive: don't blanket-allow them in your MCP client; keep the per-call approval prompt.
 
 ## Development
 
